@@ -1,11 +1,14 @@
 '''
 league_model.py
-version 1.0.0
+version 1.0.1
 
 Theodore Tasman
 2025-01-31
 
 This module contains the class definitions used to model the league data.
+
+All data gathered from https://www.pro-football-reference.com
+    specifically https://www.pro-football-reference.com/years/<YEAR>/games.htm
 '''
 
 # HYPERPARAMETERS
