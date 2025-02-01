@@ -18,7 +18,7 @@ LOSS_WEIGHT = -1
 DIFFERENTIAL_LOSS_WEIGHT = 1 # differential already includes sign, preserve the sign of the result
 RECURSIVE_LOSS_WEIGHT = 0 # can't be negative because it's recursive, sign will be determined by the recursion depth
 DIFFERENCE_WEIGHT = 0.05
-RECURSION_DEPTH = 5
+RECURSION_DEPTH = 10
 DECAY_RATE = 0.9
 
 class League:
@@ -53,17 +53,27 @@ class League:
         end_year: int
         '''
         for year in range(start_year, end_year + 1):
-            self.load_season(year, f'nfl_data_{year}.csv')
 
-    def generate_files(self, start_year, end_year, recursion_depth):
+            print(f'Loading {year} season...\r', end='')
+
+            self.load_season(year, f'nfl_data_{year}.csv')
+        
+        print('Seasons loaded. ')
+
+    def generate_files(self, recursion_depth):
         '''
         Generates files with the season summaries.
         start_year: int
         end_year: int
         '''
-        for year in range(start_year, end_year + 1):
-            season = self.get_season(year)
-            season.generate_file(f'stats_{year}.csv', recursion_depth)
+        for season in self.seasons:
+
+            print(f'Generating files for {season.year} season...\r', end='')
+
+            season.generate_file(f'stats_{season.year}.csv', recursion_depth)
+        
+        print('Files generated. ')
+
 
 class Season:
 
@@ -92,8 +102,8 @@ class Season:
         '''
         self.games.append(game)
 
-        game.home_team.addWeek(game.home_team_week)
-        game.away_team.addWeek(game.away_team_week)
+        game.home_team.add_week(game.home_team_week)
+        game.away_team.add_week(game.away_team_week)
     
     def load_games(self, filename):
         '''
@@ -109,8 +119,23 @@ class Season:
             line = line.strip().split(',')
             week = line[0]
 
+            if week == 'WildCard':
+                week = 20
+            elif week == 'Division':
+                week = 21
+            elif week == 'ConfChamp':
+                week = 22
+            elif week == 'SuperBowl':
+                week = 23
+            else:
+                week = int(week)
+
             # track if the away team won the game
             away_winner = False
+            neutral_site = False
+            
+            home_team = self.get_team(line[1])
+            away_team = self.get_team(line[3])
 
             # Determine home and away teams based on the '@' symbol
             if '@' in line[2]:
@@ -120,9 +145,8 @@ class Season:
                 # if the away team won mark the game as such
                 away_winner = True
 
-            else:
-                home_team = self.get_team(line[1])
-                away_team = self.get_team(line[3])
+            elif 'N' in line[2]:
+                neutral_site = True
 
             # Determine the score based on the winner
             if away_winner:
@@ -141,7 +165,7 @@ class Season:
                 away_turnovers = int(line[9])
             
             # Create the game object
-            game = Game(week, home_team, away_team, home_score, away_score, home_yardage, away_yardage, home_turnovers, away_turnovers)
+            game = Game(week, home_team, away_team, home_score, away_score, home_yardage, away_yardage, home_turnovers, away_turnovers, neutral_site)
             self.add_game(game)
 
             # add the game to the teams' schedules
@@ -262,8 +286,9 @@ class Season:
 
             output.append('\n')
         
-        with open(filename, 'w') as f:
+        with open(f'stats_files/{filename}', 'w') as f:
             f.writelines(output)
+
 
 class Team:
     '''
@@ -342,8 +367,6 @@ class Team:
         numerator = 0
         denominator = 0
         
-        print(f'Calculating for {self.team_id} at level {depth + 1}')
-
         if depth == 0:
             return self.power_level
         
@@ -547,7 +570,7 @@ class Game:
     A class to represent a game between two teams.
     '''
 
-    def __init__(self, week, home_team, away_team, home_score, away_score, home_yardage, away_yardage, home_turnovers, away_turnovers):
+    def __init__(self, week, home_team, away_team, home_score, away_score, home_yardage, away_yardage, home_turnovers, away_turnovers, neutral_site):
         '''
         Constructor for the Game class.
         week: str
@@ -560,20 +583,28 @@ class Game:
 
         self.home_team = home_team
         self.away_team = away_team
+        
+        self.neutral_site = neutral_site
 
         self.score = (home_score, away_score)
 
-        self.home_team_week = Team_Week(week, home_team, away_team, home_score, away_score, True, home_yardage, away_yardage, home_turnovers, away_turnovers)
+        self.home_team_week = Team_Week(week, home_team, away_team, home_score, away_score, not neutral_site, home_yardage, away_yardage, home_turnovers, away_turnovers)
         self.away_team_week = Team_Week(week, away_team, home_team, home_score, away_score, False, home_yardage, away_yardage, home_turnovers, away_turnovers)
-
 
 
 def main():
     
-    Season_2024 = Season(2024)
-    Season_2024.load_games('nfl_data_2024.csv')
+    league = League()
 
-    Season_2024.generate_file('stats_2024.csv', RECURSION_DEPTH)
+    for year in range(1970, 2025):
+
+        season = Season(year)
+        season.load_games(f'data_files/nfl_data_{year}.csv')
+
+        league.add_season(season)
+    
+    league.generate_files(RECURSION_DEPTH)
+
 
 if __name__ == '__main__':
     main()
