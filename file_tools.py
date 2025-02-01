@@ -10,7 +10,6 @@ def join_files(start_year, end_year, file_prefix, output_file):
         # Write the header
         with open(f"{file_prefix}_{start_year}.csv", "r") as infile:
             lines = infile.readlines()
-            lines[0] = "Year," + lines[0]
             outfile.write(lines[0])
 
         # Write the data
@@ -25,6 +24,9 @@ def join_files(start_year, end_year, file_prefix, output_file):
                     
                     # check for playoff data, encode it as a number
                     parts = line.split(",")
+
+                    parts[0] = parts[0].strip() + f"_{year}"
+
                     if parts[0] == "WildCard":
                         new_line = "20," + ",".join(parts[1:])
                     elif parts[0] == "Division":
@@ -34,10 +36,13 @@ def join_files(start_year, end_year, file_prefix, output_file):
                     elif parts[0] == "SuperBowl":
                         new_line = "23," + ",".join(parts[1:])
                     else:
-                        new_line = line
+                        new_line = ','.join(parts)
                     
                     # write the line to the output file
-                    outfile.write(str(year) + ',' + new_line)
+                    outfile.write(new_line)
+                
+                # write a newline to separate the years
+                #outfile.write("\n")
 
 def main():
     join_files(1970, 2024, "stats_files/stats", "all_stats.csv")
