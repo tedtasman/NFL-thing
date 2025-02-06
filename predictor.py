@@ -38,10 +38,12 @@ if __name__ == "__main__":
     stats = load_stats("all_stats.csv")
 
     # Game data
-    week = np.array([22], dtype=np.float32)
-    neutral = np.array([0], dtype=np.float32)
-    home_team = 'Philadelphia Eagles_2024'
-    away_team = 'Washington Commanders_2024'
+    week = np.array([23], dtype=np.float32)
+    neutral = np.array([1], dtype=np.float32)
+    home_team = 'Kansas City Chiefs_2022'
+    away_team = 'Philadelphia Eagles_2022'
+
+    home_team, away_team = away_team, home_team
     
     # Extract the team stats
     home_stats = stats[stats["team_id"] == home_team]

@@ -20,19 +20,22 @@ from torch.utils.data import DataLoader, TensorDataset
 # Define the model
 class RogerModel(nn.Module):
 
-    def __init__(self):
+    def __init__(self, input_size=84, hidden_size_1=32, hidden_size_2=16, output_size=6):
 
         super(RogerModel, self).__init__()
+        self.two_hidden = hidden_size_2
         self.fc1 = nn.Linear(84, 32)
-        self.fc2 = nn.Linear(32, 16)
-        self.fc3 = nn.Linear(16, 7)
+        self.fc2 = nn.Linear(32, 16 if self.two_hidden else output_size)
+        if self.two_hidden:
+            self.fc3 = nn.Linear(16, 6)
         self.relu = nn.ReLU()
     
     def forward(self, x):
 
         x = self.relu(self.fc1(x))
         x = self.relu(self.fc2(x))
-        x = self.fc3(x)
+        if self.two_hidden:
+            x = self.fc3(x)
         return x
 
 # Load the games
@@ -58,22 +61,18 @@ def prepare_data(game, stats):
     for _, game in game.iterrows():
         
         # Extract the game data
-        winner = game["Winner/tie"]
-        loser = game["Loser/tie"]
-        at = game["At"]
-        week = game["Week"]
-        neutral = [0]
-        home_team = winner
-        away_team = loser
-        home_winner = 1
+        week = game["week"]
+        home_team = game["home_team"]
+        away_team = game["away_team"]
+        points_home = game["points_home"]
+        points_away = game["points_away"]
+        yards_home = game["yards_home"]
+        turnovers_home = game["turnovers_home"]
+        yards_away = game["yards_away"]
+        turnovers_away = game["turnovers_away"]
+        neutral = game["neutral"]
 
-        # Determine the home and away teams
-        if at == '@':
-            home_team = loser
-            away_team = winner
-            home_winner = 0
-        elif at == 'N':
-            neutral = [1]
+
         
         # Extract the team stats
         home_stats = stats[stats["team_id"] == home_team]
@@ -90,7 +89,7 @@ def prepare_data(game, stats):
         # Convert to numpy arrays
         home_stats_values = home_stats.values.flatten().astype(np.float32)
         away_stats_values = away_stats.values.flatten().astype(np.float32)
-        neutral = np.array(neutral, dtype=np.float32)
+        neutral = np.array([neutral], dtype=np.float32)
         week = np.array([week], dtype=np.float32)
 
         # Concatenate the input data
@@ -100,17 +99,18 @@ def prepare_data(game, stats):
         input_data = np.nan_to_num(input_data).astype(np.float32)
 
         # Extract the target
-        target = game.drop(["Winner/tie", "Loser/tie", "At", "Week"], axis=0).values.astype(np.float32)
-        home_winner = np.array([home_winner], dtype=np.float32)
-        target = np.concatenate((home_winner, target))
+        target = game.drop(["week", "home_team", "away_team", "neutral"], axis=0).values.astype(np.float32)
 
         # Append the data
         inputs.append(input_data)
         targets.append(target)
     
+    targets = np.array(targets)
+    inputs = np.array(inputs)
+
     # Convert to tensors
-    inputs = torch.tensor(inputs)
-    targets = torch.tensor(targets)
+    inputs = torch.tensor(inputs, dtype=torch.float32)
+    targets = torch.tensor(targets, dtype=torch.float32)
     return inputs, targets
 
 def train_model(model, train_loader, optimizer, criterion, device):
@@ -146,16 +146,20 @@ def test_model(model, test_loader, criterion, device):
     test_loss = 0
 
     spread_diff = 0
-    winner_yards_diff = 0
-    winner_TO_diff = 0
-    loser_yards_diff = 0
-    loser_TO_diff = 0
+    home_points_diff = 0
+    away_points_diff = 0
+    home_yards_diff = 0
+    home_TO_diff = 0
+    away_yards_diff = 0
+    away_TO_diff = 0
 
     abs_spread_diff = 0
-    abs_winner_yards_diff = 0
-    abs_winner_TO_diff = 0
-    abs_loser_yards_diff = 0
-    abs_loser_TO_diff = 0
+    home_abs_points_diff = 0
+    away_abs_points_diff = 0
+    abs_home_yards_diff = 0
+    abs_home_TO_diff = 0
+    abs_away_yards_diff = 0
+    abs_away_TO_diff = 0
 
     correct = 0
 
@@ -177,37 +181,47 @@ def test_model(model, test_loader, criterion, device):
             for output, target in zip(outputs, targets):
                 # Calculate the spread of the prediction
                 game_spread = output[1] - output[0]
-                winner_yards = output[2]
-                winner_TO = output[3]
-                loser_yards = output[4]
-                loser_TO = output[5]
+                home_points = output[0]
+                away_points = output[1]
+                home_yards = output[2]
+                home_turnovers = output[3]
+                away_yards = output[4]
+                away_turnovers = output[5]
 
                 # Calculate the spread of the target
                 target_spread = target[1] - target[0]
-                target_winner_yards = target[2]
-                target_winner_TO = target[3]
-                target_loser_yards = target[4]
-                target_loser_TO = target[5]
+                target_home_points = target[0]
+                target_away_points = target[1]
+                target_home_yards = target[2]
+                target_home_TO = target[3]
+                target_away_yards = target[4]
+                target_away_TO = target[5]
 
                 # Calculate the difference
                 sample_spread_diff = game_spread - target_spread
-                sample_winner_yards_diff = winner_yards - target_winner_yards
-                sample_winner_TO_diff = winner_TO - target_winner_TO
-                sample_loser_yards_diff = loser_yards - target_loser_yards
-                sample_loser_TO_diff = loser_TO - target_loser_TO
+                sample_home_points_diff = home_points - target_home_points
+                sample_away_points_diff = away_points - target_away_points
+                sample_home_yards_diff = home_yards - target_home_yards
+                sample_home_TO_diff = home_turnovers - target_home_TO
+                sample_away_yards_diff = away_yards - target_away_yards
+                sample_away_TO_diff = away_turnovers - target_away_TO
 
                 # Update the metrics
                 spread_diff += sample_spread_diff
-                winner_yards_diff += sample_winner_yards_diff
-                winner_TO_diff += sample_winner_TO_diff
-                loser_yards_diff += sample_loser_yards_diff
-                loser_TO_diff += sample_loser_TO_diff
+                home_points_diff += sample_home_points_diff
+                away_points_diff += sample_away_points_diff
+                home_yards_diff += sample_home_yards_diff
+                home_TO_diff += sample_home_TO_diff
+                away_yards_diff += sample_away_yards_diff
+                away_TO_diff += sample_away_TO_diff
 
                 abs_spread_diff += abs(sample_spread_diff)
-                abs_winner_yards_diff += abs(sample_winner_yards_diff)
-                abs_winner_TO_diff += abs(sample_winner_TO_diff)
-                abs_loser_yards_diff += abs(sample_loser_yards_diff)
-                abs_loser_TO_diff += abs(sample_loser_TO_diff)
+                home_abs_points_diff += abs(sample_home_points_diff)
+                away_abs_points_diff += abs(sample_away_points_diff)
+                abs_home_yards_diff += abs(sample_home_yards_diff)
+                abs_home_TO_diff += abs(sample_home_TO_diff)
+                abs_away_yards_diff += abs(sample_away_yards_diff)
+                abs_away_TO_diff += abs(sample_away_TO_diff)
 
                 # Calculate the accuracy
                 if game_spread > 0 and target_spread > 0:
@@ -224,64 +238,67 @@ def test_model(model, test_loader, criterion, device):
 
     # Calculate the average metrics
     spread_diff /= count
-    winner_yards_diff /= count
-    winner_TO_diff /= count
-    loser_yards_diff /= count
-    loser_TO_diff /= count
+    home_points_diff /= count
+    away_points_diff /= count
+    home_yards_diff /= count
+    home_TO_diff /= count
+    away_yards_diff /= count
+    away_TO_diff /= count
 
     abs_spread_diff /= count
-    abs_winner_yards_diff /= count
-    abs_winner_TO_diff /= count
-    abs_loser_yards_diff /= count
-    abs_loser_TO_diff /= count
+    home_abs_points_diff /= count
+    away_abs_points_diff /= count
+    abs_home_yards_diff /= count
+    abs_home_TO_diff /= count
+    abs_away_yards_diff /= count
+    abs_away_TO_diff /= count
 
     # Calculate the accuracy
     accuracy = correct / count
 
-    header = ["Test Loss", "Accuracy", "Spread Diff", "Winner Yards Diff", "Winner TO Diff", "Loser Yards Diff", "Loser TO Diff", "Abs Spread Diff", "Abs Winner Yards Diff", "Abs Winner TO Diff", "Abs Loser Yards Diff", "Abs Loser TO Diff"]
-    results = [test_loss, accuracy, spread_diff, winner_yards_diff, winner_TO_diff, loser_yards_diff, loser_TO_diff, abs_spread_diff, abs_winner_yards_diff, abs_winner_TO_diff, abs_loser_yards_diff, abs_loser_TO_diff]
+    header = ["Test Loss", "Accuracy", "Spread Diff", "Home Points Diff","Away Points Diff","Home Yards Diff", "Home TO Diff", "Away Yards Diff", "Away TO Diff", "Abs Spread Diff", "Abs Home Points Diff","Abs Away Points Diff","Abs Home Yards Diff", "Abs Home TO Diff", "Abs Away Yards Diff", "Abs Away TO Diff"]
+    results = [test_loss, accuracy, spread_diff,home_points_diff, away_points_diff,home_yards_diff, home_TO_diff, away_yards_diff, away_TO_diff, abs_spread_diff, home_abs_points_diff,away_abs_points_diff, abs_home_yards_diff, abs_home_TO_diff, abs_away_yards_diff, abs_away_TO_diff]
 
     return dict(zip(header, results))
 
 
 
+def train_model_version(device, train_inputs, test_inputs, train_targets, test_targets, epochs=200, learning_rate=0.003, batch_size=64, input_size=84, hidden_size_1=32, hidden_size_2=16, output_size=6):
 
+    model = RogerModel(input_size=input_size, hidden_size_1=hidden_size_1, hidden_size_2=hidden_size_2, output_size=output_size).to(device)
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    criterion = nn.MSELoss()
 
+    train_dataset = TensorDataset(train_inputs, train_targets)
+    test_dataset = TensorDataset(test_inputs, test_targets)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
+    for epoch in range(epochs):
+        train_model(model, train_loader, optimizer, criterion, device)
+    
+    results = test_model(model, test_loader, criterion, device)
+    return model, results
 
 
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = RogerModel().to(device)
-    optimizer = optim.Adam(model.parameters(), lr=0.003)
-    criterion = nn.MSELoss()
 
-    train_games, test_games = load_games("nfl_data.csv")
+    train_games, test_games = load_games("better_nfl_data.csv")
     stats = pd.read_csv("all_stats.csv")
 
     train_inputs, train_targets = prepare_data(train_games, stats)
     test_inputs, test_targets = prepare_data(test_games, stats)
 
-    train_dataset = TensorDataset(train_inputs, train_targets)
-    test_dataset = TensorDataset(test_inputs, test_targets)
-    train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
+    shapes_list = [(16, 0), (32, 8), (42, 10)]
 
-    epochs = 200
-    for epoch in range(epochs):
-        loss = train_model(model, train_loader, optimizer, criterion, device)
-        print(f"Epoch {epoch+1}/{epochs} completed\t Loss: {loss}")
-
-    # Test the model
-    results = test_model(model, test_loader, criterion, device)
-
-    for key, value in results.items():
-        print(f"{key}: {value}")
-
-    # Save the model
-    torch.save(model.state_dict(), "nfl_model.pth")
-    torch.save(optimizer.state_dict(), "optimizer.pth")
-    print("Model and optimizer state saved.")
+    for shape in shapes_list:
+        print(f"Training model for {shape} shape...")
+        model, results = train_model_version(device, train_inputs=train_inputs, train_targets=train_targets, test_inputs=test_inputs, test_targets=test_targets, hidden_size_1=shape[0], hidden_size_2=shape[1])
+        print(f"Results for {shape} shape:")
+        for key, value in results.items():
+            print(f"{key}: {value}")
+        print("\n")
 
 if __name__ == "__main__":
     main()

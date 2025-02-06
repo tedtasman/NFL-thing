@@ -44,9 +44,56 @@ def join_files(start_year, end_year, file_prefix, output_file):
                 # write a newline to separate the years
                 #outfile.write("\n")
 
-def main():
-    join_files(1970, 2024, "stats_files/stats", "all_stats.csv")
+def new_layout(input_file, output_file):
 
+    with open(input_file, "r") as infile:
+        lines = infile.readlines()
+    
+    with open(output_file, "w") as outfile:
+        
+        outfile.write("week,home_team,away_team,points_home,points_away,yards_home,turnovers_home,yards_away,turnovers_away,neutral\n")
+
+        neutral_count = 0
+
+        for line in lines[1:]:
+            
+            if line == "\n":
+                continue
+
+            parts = line.split(",")
+
+            week = parts[0].strip()
+            home_team = parts[1].strip()
+            at = parts[2].strip()
+            away_team = parts[3].strip()
+            points_home = parts[4].strip()
+            points_away = parts[5].strip()
+            yards_home = parts[6].strip()
+            turnovers_home = parts[7].strip()
+            yards_away = parts[8].strip()
+            turnovers_away = parts[9].strip()
+            neutral = 0
+
+            # if the winner was away, swap the teams
+            # if the game was neutral, swap for even lines
+            if at == "@" or (at == "N" and neutral_count % 2 == 1):
+                home_team, away_team = away_team, home_team
+                points_home, points_away = points_away, points_home
+                yards_home, yards_away = yards_away, yards_home
+                turnovers_home, turnovers_away = turnovers_away, turnovers_home
+            
+            # if the game was neutral, increment the counter
+            if at == "N":
+                neutral_count += 1
+                neutral = 1
+
+            # write the new line
+            new_line = f"{week},{home_team},{away_team},{points_home},{points_away},{yards_home},{turnovers_home},{yards_away},{turnovers_away},{neutral}\n"
+            outfile.write(new_line)
+
+
+def main():
+    new_layout("nfl_data.csv", "better_nfl_data.csv")
 if __name__ == "__main__":
     main()
                         
