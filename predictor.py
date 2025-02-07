@@ -3,18 +3,21 @@ import torch.nn as nn
 from roger_pytorch_gpu import load_stats, RogerModel
 import numpy as np
 
+# Set the device
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 # Create an instance of the model
-model = RogerModel()
+model = RogerModel(input_size=41, hidden_size_1=16, hidden_size_2=4, hidden_size_3=0, output_size=1).to(device)
 
 # Load the model state dictionary
-model.load_state_dict(torch.load('nfl_model.pth'))
+model.load_state_dict(torch.load('roger_model_spread.pth'))
 
 # Ensure the model is in evaluation mode
 model.eval()
 
 # Load the optimizer state dictionary
 optimizer = torch.optim.Adam(model.parameters())
-optimizer.load_state_dict(torch.load('optimizer.pth'))
+optimizer.load_state_dict(torch.load('optimizer_spread.pth'))
 
 
 def predict_matchup(data):
@@ -35,13 +38,13 @@ def predict_matchup(data):
 if __name__ == "__main__":
 
     # Load the stats
-    stats = load_stats("all_stats.csv")
+    stats = load_stats("normalized_stats.csv")
 
     # Game data
-    week = np.array([23], dtype=np.float32)
-    neutral = np.array([1], dtype=np.float32)
-    home_team = 'Kansas City Chiefs_2022'
-    away_team = 'Philadelphia Eagles_2022'
+    week = np.array([12], dtype=np.float32)
+    neutral = np.array([0], dtype=np.float32)
+    home_team = 'Philadelphia Eagles_2024'
+    away_team = 'Optimal Team'
 
     home_team, away_team = away_team, home_team
     
@@ -53,12 +56,14 @@ if __name__ == "__main__":
     home_stats = home_stats.drop(["team_id"], axis=1)
     away_stats = away_stats.drop(["team_id"], axis=1)
 
+    # Calculate the difference between away and home stats
+    diff_stats = away_stats.values - home_stats.values
+
     # Convert to numpy arrays
-    home_stats_values = home_stats.values.flatten().astype(np.float32)
-    away_stats_values = away_stats.values.flatten().astype(np.float32)
+    diff_stats = diff_stats.flatten().astype(np.float32)
 
     # Concatenate the input data
-    input_data = np.concatenate((home_stats_values, away_stats_values, neutral, week))
+    input_data = diff_stats
 
     # Ensure the data is numeric
     input_data = np.nan_to_num(input_data).astype(np.float32)

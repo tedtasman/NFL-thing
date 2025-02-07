@@ -16,26 +16,37 @@ import torch.nn as nn
 import torch.optim as optim
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, TensorDataset
+import matplotlib.pyplot as plt
 
 # Define the model
 class RogerModel(nn.Module):
 
-    def __init__(self, input_size=84, hidden_size_1=32, hidden_size_2=16, output_size=6):
+    def __init__(self, input_size=84, hidden_size_1=32, hidden_size_2=16, hidden_size_3=0, output_size=6):
 
         super(RogerModel, self).__init__()
         self.two_hidden = hidden_size_2
-        self.fc1 = nn.Linear(84, 32)
-        self.fc2 = nn.Linear(32, 16 if self.two_hidden else output_size)
-        if self.two_hidden:
-            self.fc3 = nn.Linear(16, 6)
+        self.three_hidden = hidden_size_3
+        self.fc1 = nn.Linear(input_size, hidden_size_1)
+        self.fc2 = nn.Linear(hidden_size_1, hidden_size_2 if self.two_hidden else output_size)
+
+        if self.three_hidden:
+            self.fc3 = nn.Linear(hidden_size_2, hidden_size_3)
+            self.fc4 = nn.Linear(hidden_size_3, output_size)
+
+        elif self.two_hidden:
+            self.fc3 = nn.Linear(hidden_size_2, output_size)
+
         self.relu = nn.ReLU()
     
     def forward(self, x):
-
         x = self.relu(self.fc1(x))
-        x = self.relu(self.fc2(x))
+        x = self.fc2(x)
         if self.two_hidden:
+            x = self.relu(x)
             x = self.fc3(x)
+        if self.three_hidden:
+            x = self.relu(x)
+            x = self.fc4(x)
         return x
 
 # Load the games
@@ -281,24 +292,153 @@ def train_model_version(device, train_inputs, test_inputs, train_targets, test_t
     return model, results
 
 
+def prepare_data_spread(game, stats):
+    
+    inputs = []
+    targets = []
+
+    for _, game in game.iterrows():
+        
+        # Extract the game data
+        week = game["week"]
+        home_team = game["home_team"]
+        away_team = game["away_team"]
+        #neutral = game["neutral"]
+        spread = game["spread"]
+
+        # Extract the team stats
+        home_stats = stats[stats["team_id"] == home_team]
+        away_stats = stats[stats["team_id"] == away_team]
+
+        # Skip if stats are missing
+        if home_stats.empty or away_stats.empty:
+            continue
+
+        # Remove the team ID
+        home_stats = home_stats.drop(["team_id"], axis=1)
+        away_stats = away_stats.drop(["team_id"], axis=1)
+
+        # Calculate the difference between away and home stats
+        diff_stats = away_stats.values - home_stats.values
+
+        # Convert to numpy arrays
+        diff_stats = diff_stats.flatten().astype(np.float32)
+        #neutral = np.array([neutral], dtype=np.float32)
+        week = np.array([week], dtype=np.float32)
+        spread = np.array([spread], dtype=np.float32)
+
+        # Concatenate the input data
+        input_data = diff_stats
+        output_data = spread
+
+        # Ensure the data is numeric
+        input_data = np.nan_to_num(input_data).astype(np.float32)
+        output_data = np.nan_to_num(output_data).astype(np.float32)
+
+        # Append the data
+        inputs.append(input_data)
+        targets.append(output_data)
+
+    targets = np.array(targets)
+    inputs = np.array(inputs)
+
+    # Convert to tensors
+    inputs = torch.tensor(inputs, dtype=torch.float32)
+    targets = torch.tensor(targets, dtype=torch.float32)
+
+    return inputs, targets
+
+
+def test_model_spread(model, test_loader, criterion, device):
+
+    model.eval()
+    test_loss = 0
+
+    spread_diffs = []
+    square_diffs = []
+
+    with torch.no_grad():
+
+        for inputs, targets in test_loader:
+            
+            # Move the data to the device (GPU)
+            inputs, targets = inputs.to(device), targets.to(device)
+
+            # Forward pass
+            outputs = model(inputs)
+
+            # Calculate the loss
+            test_loss += criterion(outputs, targets).item()
+
+            # Calculate the spread of the prediction
+            game_spread = outputs
+            target_spread = targets
+
+            # Calculate the difference
+            sample_spread_diff = game_spread - target_spread
+
+            # Update the metrics
+            spread_diffs.append(sample_spread_diff)
+            square_diffs.append(sample_spread_diff ** 2)
+
+    # Calculate the average loss
+    test_loss /= len(spread_diffs)
+
+    mean_spread_diff = sum(spread_diffs) / len(spread_diffs)
+    mean_square_diff = sum(square_diffs) / len(square_diffs)
+
+    variance_spread_diff = sum((diff - mean_spread_diff) ** 2 for diff in spread_diffs) / len(spread_diffs)
+    variance_square_diff = sum((diff - mean_square_diff) ** 2 for diff in square_diffs) / len(square_diffs)
+
+    # Convert spread_diffs and square_diffs to numpy arrays for easier manipulation
+    spread_diffs = torch.cat(spread_diffs).cpu().numpy()
+    square_diffs = torch.cat(square_diffs).cpu().numpy()
+
+    print("Test Loss: " + str(test_loss))
+    print("Average Spread Difference: " + str(mean_spread_diff))
+    print("Average Square Difference: " + str(mean_square_diff))
+    print("Variance of Spread Differences: " + str(variance_spread_diff))
+    print("Variance of Square Differences: " + str(variance_square_diff))
+
+
+
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    train_games, test_games = load_games("better_nfl_data.csv")
-    stats = pd.read_csv("all_stats.csv")
+    train_games, test_games = load_games("nfl_data_spread.csv")
+    stats = pd.read_csv("no_recursion_stats.csv")
 
-    train_inputs, train_targets = prepare_data(train_games, stats)
-    test_inputs, test_targets = prepare_data(test_games, stats)
+    train_inputs, train_targets = prepare_data_spread(train_games, stats)
+    test_inputs, test_targets = prepare_data_spread(test_games, stats)
 
-    shapes_list = [(16, 0), (32, 8), (42, 10)]
+    model = RogerModel(input_size=4, hidden_size_1=10, hidden_size_2=0, hidden_size_3=0, output_size=1).to(device)
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    criterion = nn.MSELoss()
+    train_loader = DataLoader(TensorDataset(train_inputs, train_targets), batch_size=1024, shuffle=True)
+    losses = []
+    for epoch in range(400):
+        loss = train_model(model, train_loader, optimizer, criterion, device)
+        if (epoch + 1) % 10 == 0:
+            print(f"Epoch {epoch + 1}, Loss: {loss}", end="\r")
+        losses.append(loss)
+    import matplotlib.pyplot as plt
 
-    for shape in shapes_list:
-        print(f"Training model for {shape} shape...")
-        model, results = train_model_version(device, train_inputs=train_inputs, train_targets=train_targets, test_inputs=test_inputs, test_targets=test_targets, hidden_size_1=shape[0], hidden_size_2=shape[1])
-        print(f"Results for {shape} shape:")
-        for key, value in results.items():
-            print(f"{key}: {value}")
-        print("\n")
+    # Plot the training loss
+    plt.figure(figsize=(10, 5))
+    plt.plot(losses, label='Training Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.title('Training Loss Over Epochs')
+    plt.legend()
+    plt.show()
+
+    test_loader = DataLoader(TensorDataset(test_inputs, test_targets), batch_size=1, shuffle=False)
+    test_model_spread(model, test_loader, criterion, device)
+
+    # Save the model
+    torch.save(model.state_dict(), "roger_model_spread.pth")
+    torch.save(optimizer.state_dict(), "optimizer_spread.pth")
+    print("Model saved as roger_model_spread.pth")
 
 if __name__ == "__main__":
     main()
